@@ -3,66 +3,55 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Проверяем наличие DATABASE_URL
-if (!process.env.DATABASE_URL) {
-  console.error('FATAL: DATABASE_URL не установлен в .env файле');
-  process.exit(1);
+// Вручную парсим строку подключения
+function getConfig() {
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL не установлен');
+    process.exit(1);
+  }
+
+  try {
+    const url = new URL(process.env.DATABASE_URL);
+    return {
+      user: url.username,
+      password: url.password,
+      host: url.hostname,
+      port: url.port,
+      database: url.pathname.slice(1),
+      ssl: {
+        rejectUnauthorized: false
+      }
+    };
+  } catch (err) {
+    console.error('❌ Ошибка парсинга DATABASE_URL:', err.message);
+    process.exit(1);
+  }
 }
 
-// Форматируем строку подключения для Render
-const connectionString = process.env.DATABASE_URL.startsWith('postgres://') 
-  ? process.env.DATABASE_URL.replace('postgres://', 'postgresql://')
-  : process.env.DATABASE_URL;
+const pool = new Pool(getConfig());
 
-const pool = new Pool({
-  connectionString: connectionString,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-// Тестовое подключение
-async function testConnection() {
+// Проверка подключения с подробным логированием
+export async function testConnection() {
+  let client;
   try {
-    await pool.query('SELECT NOW()');
-    console.log('✅ Подключение к PostgreSQL успешно');
+    console.log('⌛ Проверка подключения к PostgreSQL...');
+    client = await pool.connect();
+    const { rows } = await client.query('SELECT NOW() as time, current_database() as db');
+    console.log('✅ Подключение успешно:');
+    console.log(`   Время БД: ${rows[0].time}`);
+    console.log(`   Имя БД: ${rows[0].db}`);
     return true;
   } catch (err) {
-    console.error('❌ Ошибка подключения к PostgreSQL:', err.message);
+    console.error('❌ Ошибка подключения:');
+    console.error(err);
     return false;
-  }
-}
-
-// Инициализация таблиц
-async function initDB() {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-    
-    await client.query('COMMIT');
-    console.log('✅ Таблицы БД инициализированы');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ Ошибка инициализации БД:', err.message);
-    throw err;
   } finally {
-    client.release();
+    client?.release();
   }
 }
 
 export default {
   query: (text, params) => pool.query(text, params),
   pool,
-  testConnection,
-  initDB
+  testConnection
 };

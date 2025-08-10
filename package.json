@@ -8,13 +8,13 @@
     "migrate": "node migrations/migrate.js"
   },
   "dependencies": {
-    "pg": "^8.11.3",
-    "dotenv": "^16.3.1",
-    "express": "^5.1.0",
     "bcryptjs": "^3.0.2",
-    "jsonwebtoken": "^9.0.2",
+    "body-parser": "^2.2.0",
     "cors": "^2.8.5",
-    "body-parser": "^2.2.0"
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3"
   },
   "engines": {
     "node": ">=18.0.0"
