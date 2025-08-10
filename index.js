@@ -1,11 +1,15 @@
-require('dotenv').config(); // Для работы с .env
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const documentsRouter = require('./routes/documents');
+import dotenv from 'dotenv';
+dotenv.config();
+
+
+import express from 'express';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import documentsRouter from './routes/documents.js';
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -107,3 +111,5 @@ initializeDatabase().then(() => {
     console.log(`Сервер запущен на порту ${PORT}`);
   });
 });
+
+export default app;

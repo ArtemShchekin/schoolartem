@@ -1,30 +1,50 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+import { Pool } from 'pg';
+import dotenv from 'dotenv';
 
-// Настройка подключения к PostgreSQL
-const pool = new Pool({
+dotenv.config();
+
+// Конфигурация подключения к PostgreSQL
+const poolConfig = {
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { 
     rejectUnauthorized: false 
-  } : false
+  } : false,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
+};
+
+const pool = new Pool(poolConfig);
+
+// Обработка событий пула соединений
+pool.on('connect', () => {
+  console.log('Установлено новое подключение к БД');
 });
 
-// Функция для инициализации таблиц
+pool.on('error', (err) => {
+  console.error('Ошибка в пуле соединений:', err);
+});
+
+// Инициализация структуры базы данных
 async function initializeDatabase() {
+  const client = await pool.connect();
+  
   try {
-    // Создаем таблицу пользователей
-    await pool.query(`
+    await client.query('BEGIN');
+
+    // Создание таблицы пользователей
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Создаем таблицу документов
-    await pool.query(`
+    // Создание таблицы документов
+    await client.query(`
       CREATE TABLE IF NOT EXISTS documents (
         id SERIAL PRIMARY KEY,
         code INTEGER UNIQUE NOT NULL,
@@ -38,54 +58,67 @@ async function initializeDatabase() {
       )
     `);
 
-    console.log('Таблицы базы данных успешно инициализированы');
+    // Создание индексов для улучшения производительности
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS documents_status_idx ON documents(status)
+    `);
+
+    await client.query('COMMIT');
+    console.log('Структура базы данных успешно инициализирована');
   } catch (error) {
-    console.error('Ошибка инициализации базы данных:', error);
+    await client.query('ROLLBACK');
+    console.error('Ошибка при инициализации БД:', error);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-// Проверка подключения и инициализация
-(async function checkConnection() {
+// Проверка и инициализация подключения
+(async () => {
   try {
-    await pool.query('SELECT NOW()');
-    console.log('Успешное подключение к PostgreSQL');
+    const { rows } = await pool.query('SELECT NOW()');
+    console.log('Успешное подключение к PostgreSQL. Текущее время сервера:', rows[0].now);
     await initializeDatabase();
   } catch (error) {
-    console.error('Ошибка подключения к PostgreSQL:', error);
-    process.exit(1); // Завершаем процесс с ошибкой
+    console.error('Критическая ошибка подключения к PostgreSQL:', error);
+    process.exit(1);
   }
 })();
 
-// Экспортируем объект для работы с базой
-module.exports = {
-  query: (text, params) => pool.query(text, params),
-  pool: pool,
-  initializeDatabase: initializeDatabase,
-  
-  // Дополнительные методы для удобства
-  getClient: async () => {
-    const client = await pool.connect();
-    return {
-      client,
-      query: client.query.bind(client),
-      release: client.release.bind(client)
-    };
-  },
-  
-  // Метод для транзакций
-  transaction: async (callback) => {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await callback(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+// Метод для выполнения транзакций
+async function transaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
+}
+
+// Экспорт методов для работы с базой
+export default {
+  // Основной метод для запросов
+  query: (text, params) => pool.query(text, params),
+  
+  // Получение клиента для ручного управления
+  getClient: () => pool.connect(),
+  
+  // Пул соединений
+  pool,
+  
+  // Инициализация БД
+  initializeDatabase,
+  
+  // Выполнение транзакций
+  transaction,
+  
+  // Закрытие всех соединений (для graceful shutdown)
+  close: () => pool.end()
 };
